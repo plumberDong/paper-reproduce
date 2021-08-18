@@ -1,0 +1,164 @@
+---
+title: "fuxian"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+pacman::p_load(tidyverse, haven, ggplot2, cowplot)
+```
+
+
+## DATA
+
+```{r}
+data <- read_dta("../DATA/hospital.dta")
+data  
+```
+
+```{r}
+dim(data)  # 1666个
+names(data)
+```
+
+```{r}
+# Tab.1
+
+des <- function(x, ...){
+  Mean <- mean(x, ...) %>% round(2) ; Sd <- sd(x, ...) %>% round(2)
+  Min <- min(x, ...) %>% round(2)  ; Max <- max(x, ...) %>% round(2)
+  N = length(x)
+  list(Mean = Mean, Sd = Sd, Min = Min, Max = Max, N = N)
+}
+
+
+data1 <- data %>%
+  select(chouzi, time,chouzi1, c_time, rate, 
+         shouru, medicalfee, self_fee, health, adl,
+         wealth, disease, healthchild, healthshock, ge010_7, smoke, drink, kids, older, age, edu, marriage, xrgender,
+         medicalnum, jj016, jd003, xinnonghe)
+  # 看起来Tab1里面和健康有关的变量，作者把方向都搞反了
+  # 好在Tab3里面又都正过来了
+
+data1 %>% 
+  select(- xinnonghe) %>%
+  map_dfr(.f = ~des(., na.rm = T))
+
+```
+
+```{r}
+# Tab.3
+data2 <- data1 %>%
+  select(medicalfee, self_fee, health, adl, shouru, disease, healthchild, wealth, xinnonghe)
+
+# 待t检验的变量
+wait_t_test <- c("medicalfee", "self_fee", "health", "adl", "shouru", "disease", "healthchild", "wealth")
+
+# 执行t检验的函数
+ttest <- function(x, data = data2){
+  t_result <- t.test(as.formula(paste0(x, "~ xinnonghe")), data = data)
+  list(No = t_result$estimate[1], Yes = t_result$estimate[2],
+       tvalue = t_result$statistic, pvalue = t_result$p.value)
+}
+
+map_dfr(wait_t_test, ~ ttest(.)) %>%
+  bind_cols(Var = names(data2)[-9]) %>%
+  select(Var, everything())
+
+# Tab4 到 Tab6 的原理类似，就不复现了
+```
+
+
+```{r}
+# Tab.8 PSM
+library(MatchIt)
+
+# 全住院样本
+set.seed(10101)
+m.out <- matchit(data = data,
+                 formula = xinnonghe ~ age+ marriage + chouzi1 + xrgender + factor(edu) + wealth + kids + older + disease + renshu + medicalnum + c_time + rate + factor(areatype) + factor(prov) + factor(year),
+                 ratio = 1, # 原文是1:3的匹配，可以改成3
+                 method = "nearest",
+                 replace = F,
+                 caliper = .2)
+```
+
+```{r}
+# 平衡性检验
+retest <- summary(m.out, standardize = T)$sum.matched 
+cbind(rownames(retest) ,round(retest[,1:4],2)) %>% as_tibble()
+```
+
+```{r}
+# 查看匹配后的样本数量
+table(match.data(m.out)$xinnonghe)
+# 还剩97个
+```
+
+```{r}
+# 进行t检验
+m.data <- match.data(m.out)
+
+wait_t_test <- c("medicalfee", "self_fee", "health", "adl", "shouru")
+
+map_dfr(wait_t_test, ~ ttest(., data = m.data)) %>%
+  bind_cols(Var = wait_t_test) %>%
+  select(Var, everything()) %>%
+  mutate(diff = Yes - No) %>%
+  mutate(across(2:6, ~round(.,digits = 3)))
+
+# 可以看，匹配的结果和原文的不同，但由于随机性以及算法的不同，是比较正常的
+# 对于原文中显著的变量adl，这里也比较显著；不显著的变量，ATT的总体方向也没有改变。
+```
+
+```{r}
+# Tab.9
+library(lmtest)
+library(car)
+
+
+OLS9_1 <- lm(health ~ time + healthchild + disease + wealth  + smoke + drink + medicalnum + marriage + age + kids + older + renshu + xrgender + jj016 +  jd003 +  factor(edu) + factor(areatype) + factor(prov) + factor(year), data = data)
+summary(OLS9_1)
+
+OLS9_2 <- lm(adl~ time + healthchild + disease + wealth  + smoke + drink + medicalnum + marriage + age + kids + older + renshu + xrgender + jj016 +  jd003 +  factor(edu) + factor(areatype) + factor(prov) + factor(year), data = data)
+summary(OLS9_2)
+```
+
+
+```{r}
+# Tab. 10
+cal_OLS <- function(x){
+  myformula <- as.formula(paste0(x , "~ xinnonghe + wealth + disease + healthchild + healthshock + smoke + drink + ge010_7 + renshu + marriage + age + kids + older + xrgender + medicalnum + jj016 + jd003 + factor(edu) + factor(prov) + factor(areatype) + factor(year)"))
+  OLS <- lm(myformula, data = data)
+  result <- coeftest(OLS, .voc = hccm)
+  print(x)
+  print(round(result[2,],2))
+}
+
+wait_for <- c("medicalfee", "self_fee", "health", "adl", "shouru")
+walk(wait_for, ~cal_OLS(.))
+```
+
+```{r}
+# Tab.11
+# 只复现全样本中的medicalfee
+library(AER)
+# 工具变量
+IV_OLS <- ivreg(medicalfee ~ xinnonghe +  wealth + disease + healthchild + healthshock + smoke + drink + ge010_7 + renshu + marriage + age + kids + older + xrgender + medicalnum + jj016 + jd003 + factor(edu) + factor(prov) + factor(areatype) + factor(year) | c_time + chouzi1 + rate +wealth + disease + healthchild + healthshock + smoke + drink + ge010_7 + renshu + marriage + age + kids + older + xrgender + medicalnum + jj016 + jd003 + factor(edu) + factor(prov) + factor(areatype) + factor(year), data = data)
+
+# 查看豪斯曼检验
+summary(IV_OLS, diagnostics = TRUE)
+```
+`Weak instruments` means that the instrument has a low correlation with the endogenous explanatory variable. This could result in a larger variance in the coefficient, and severe finite-sample bias. "The cure can be worse than the disease" (Bound, Jaeger, Baker, 1993/1995). See here for more details. From the help file for AER, it says it does an F-test on the first stage regression; I believe the null is that the instrument is weak. For the model you report, the null is rejected, so you can move forward with the assumption that the instrument is sufficiently strong.
+
+`Wu-Hausman` tests that IV is just as consistent as OLS, and since OLS is more efficient, it would be preferable. The null here is that they are equally consistent; in this output, Wu-Hausman is significant at the p<0.1 level, so if you are OK with that confidence level, that would mean IV is consistent and OLS is not.
+
+`Sargan tests` overidentification restrictions. The idea is that if you have more than one instrument per endogenous variable, the model is overidentified, and you have some excess information. All of the instruments must be valid for the inferences to be correct. So it tests that all exogenous instruments are in fact exogenous, and uncorrelated with the model residuals. If it is significant, it means that you don't have valid instruments (somewhere in there, as this is a global test). In this case, this isn't a concern. This can get more complex, and researchers have suggested doing further analysis (see this).
+
+
+
+
