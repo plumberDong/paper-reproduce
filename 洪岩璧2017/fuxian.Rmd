@@ -1,0 +1,340 @@
+---
+title:"再分配与幸福感阶层差异的变迁"
+output:html_document
+---
+
+```{rsetup,include=FALSE}
+knitr::opts_chunk$set(echo=TRUE)
+```
+
+
+## 1. 核心假设
+
+-$H_1a$:2005—2005年，相对于中下层，中上层变得更幸福。
+-$H_1b$:2005—2005年，相对于中下层，中上层并未变得更幸福。
+-$H_2a$:宏观税负水平提升会降低个体的幸福感。
+-$H_2b$:宏观税负水平对较高收入群体的负效应更大。
+-$H_3a$:再分配水平提升会增加个体的幸福感。
+-$H_3b$:再分配水平提升对较低收入群体的正效应更大，或对较高收入群体的负效应更大。
+
+## 2. 数据与变量
+
+```{r}
+library(haven)
+library(tidyverse)
+```
+
+```{r}
+cgss2005 <- read_dta("cgss2005_14.dta")
+# 备份数据
+data2005 <- as_tibble(cgss2005)
+dim(data2005)
+```
+
+
+```{r}
+# generate binary happiness variable
+# qe03 总体而言，您对自己所过的生活的感觉是怎么样的呢？您感觉您的生活是(幸福)：
+data2005 <- mutate(data2005, happy = ifelse(qe03 %in% 1:3, 0, 1))
+
+# peer comparison with 3 categories, reference 'so-so'
+# qe01: 与同龄人相比，您认为您本人的社会经济地位是
+data2005 <- mutate(data2005, peerh = ifelse(qe01 == 1, 1, 0),
+                   peerl = ifelse(qe01 == 3, 1, 0))
+
+# As three level dep var
+data2005 <- data2005 %>%
+  mutate(peer = case_when(qe01 == 3 ~ 1,
+                          qe01 %in% 2:4 ~ 2,
+                          qe01 == 1 ~ 3))
+
+# self comparison with 3 categories,reference 'so-so'
+# qe02 : 与三年前相比，您认为您的社会经济地位是
+data2005 <- mutate(data2005, up = ifelse(qe02 == 1, 1, 0))
+data2005 <- mutate(data2005, down = ifelse(qe02 == 3, 1, 0))
+
+# As three level dep var
+data2005 <- data2005 %>%
+  mutate(self = case_when(qe02 == 3 ~ 1,
+                          qe02 %in% 2:4 ~ 2,
+                          qe02 == 1 ~ 3))
+
+# Close contact with relatives and friends
+# qe05 : 您和亲戚/朋友之间的接触和联系的密切程度是怎样的呢？
+data2005 <- mutate(data2005, close = ifelse(qe05 %in% c(4, 5), 1, 0))
+
+# HEALTHY
+# qd1: 总的来说，您认为您上个月的健康状况是怎样的呢？
+data2005 <- mutate(data2005, health = ifelse(qd1 %in% 1:3, 1, 0))
+
+# MALE VS. FEMALE
+data2005 <- mutate(data2005, male = ifelse(qa2_01 == 1, 1, 0))
+
+# AGE & AGE SQUARE
+data2005 <- mutate(data2005, age  = 2005 - qa3_01,
+                   age2 = age^2 / 100 ,
+                   age1 = ifelse(age>24 & age<70, age, NA))
+
+
+data2005 <- mutate(data2005, 
+                   # HAN VS. MINORITIES
+                   han = ifelse(qa4_01 == 1, 1, 0),
+                   # URBAN VS. Rural residence
+                   urban = ifelse(qs2c == 1, 1, 0),
+                   # IN MARRIAGE
+                   marry = ifelse( (qb02 %in% c(4, 6) | qb01 == 2), 1, 0),
+                   # CCP MEMBER
+                   party = ifelse(qb04a == 1, 1, 0),
+                   # HIGHER EDUCATION
+                   hedu = ifelse(qb03b>16 & qb03b<23, 1, 0),
+                   # four categories of edu
+                   edu = case_when(qb03b>0 & qb03b<9 ~ 1,
+                                   qb03b>8 & qb03b<12 ~ 2,
+                                   qb03b>11 & qb03b<17 ~ 3,
+                                   qb03b>16 & qb03b<23 ~ 4),
+                   edu_1 = ifelse(edu == 1, 1, 0),
+                   edu_2 = ifelse(edu == 2, 1, 0),
+                   edu_3 = ifelse(edu == 3, 1, 0),
+                   edu_4 = ifelse(edu == 4, 1, 0),
+                   # schooling years
+                   schy = case_when(qb03b %in% 1:2 ~ 0,
+                                    qb03b>2 & qb03b<15 ~ qb03b-2,
+                                    qb03b %in% c(15, 17, 19) ~ qb03b-3,
+                                    qb03b %in% c(16, 18, 20) ~ qb03b-4,
+                                    qb03b==21 ~ qb03b-2,
+                                    qb03b==22 ~ qb03b - 3),
+                   # NATURAL LOG OF PER FAMILEY MEMBER MONTHLY INCOME
+                   # qc09 : 请您估计一下，您家2004年全年家庭各种收入总和是多少元
+                   # qc08 : 请您告诉我您家共有几口人
+                   perin = qc09/(12*qc08),
+                   lnperin=log(perin)
+                   )
+
+# OCCUPATIONAL CLASSES
+# qb09b : 您目前（失业前或退休前）的主要职业是什么？
+#1 "administrator/professional" 2 "clerk" 5 "worker" ///
+# 4 "server" 3 "self-employed" 6 "peasant" 7 "unemployed"
+
+
+data2005 <- mutate(data2005,
+                      occ = NA,
+                      occ = ifelse( (qb09b>9 & qb09b<51) | (qb09b>109 & qb09b<311), 1, occ),
+                      occ = ifelse(  (qb09b>310 & qb09b<391) | qb09b==601, 2, occ ),
+                      occ = ifelse( qb09b==60, 3, occ),
+                      occ = ifelse( qb09b>399 & qb09b<491, 4, occ),
+                      occ = ifelse( (qb09b>601 & qb09b<879) | (qb09b>880 & qb09b<899) | qb09b==999 | qb09b==880 | qb09b==993, 5, occ),
+                      occ = ifelse( ((qb09b>509 & qb09b<593) | qb09b==500 | qa7_01==7), 6, occ)
+                  )  
+
+data2005$occ[(data2005$qb09b>5 & data2005$qb09b<8) | data2005$qb09b==9 | data2005$qa7_01==5] <- 7
+
+data2005 <- mutate(data2005, 
+                   adpr = ifelse(occ == 1, 1, 0),
+                   clerk = ifelse(occ == 2, 1, 0),
+                   slemp = ifelse(occ == 3, 1, 0),
+                   serve = ifelse(occ == 4, 1, 0),
+                   worker = ifelse(occ == 5, 1, 0),
+                   farm = ifelse(occ == 6, 1, 0),
+                   unemp = ifelse(occ == 7, 1, 0))
+
+
+# Wealth, estate
+data2005 <- mutate(data2005,
+                   house = NA,
+                   # 1=have properties, 0= none
+                   house = case_when(qc02==4 | qc02==5 | qc02==6 ~ 1,
+                                     qc02<4 | qc02>6 ~ 0),
+                   # 0=none, 1=1 property, 2=more than 1
+                   house1 = house,
+                   house1 == ifelse(house==1 & qc05a==2, 2, house1))
+
+
+# qe03: 总体而言，您对自己所过的生活的感觉是怎么样的呢？您感觉您的生活是
+data2005 <- rename(data2005,
+                   he = edu_4,
+                   ss = edu_3,
+                   js = edu_2,
+                   pe = edu_1,
+                   swb = qe03)
+```
+
+```{r}
+table(data2005$occ)
+```
+
+```{r}
+# LISTWISE MISSING DATA
+tempdata <- data2005 %>%
+  select(swb, male, han, age1, age2, health, marry,
+        party, lnperin, up, down, peerh, peerl, urban, close, edu, peer, self, clerk, slemp, serve, worker, adpr, unemp, edu, he, ss, pe, occ, qs2a) 
+nomiss = complete.cases(tempdata)
+
+tempdata <- tempdata %>%
+  mutate(Nomiss = nomiss)
+```
+
+```{r}
+tempdata
+```
+
+
+```{r}
+cal_mean_sd <- function(x){
+  Mean <- mean(x) %>% round(3)
+  Sd <- sd(x) %>% round(3)
+  list(Mean = Mean, Sd = Sd)
+}
+
+# 描述统计1
+tempdata[nomiss, ] %>%
+map_dfr(cal_mean_sd) %>%
+  bind_cols(Var = colnames(tempdata)) %>%
+  select(Var, everything())
+```
+
+```{r}
+# 描述统计2
+tempdata[nomiss, ] %>%
+  count(peer) %>%
+  mutate(prop = round(`n` * 100 / sum(`n`), 2 ))
+```
+
+```{r}
+tempdata[nomiss, ] %>%
+  count(edu) %>%
+  mutate(prop = round(`n` * 100 / sum(`n`), 2 ))
+```
+
+```{r}
+tempdata[nomiss, ] %>%
+  count(occ) %>%
+  mutate(prop = round(`n` * 100 / sum(`n`), 2 ))
+```
+```{r}
+# 社会经济地位相对于过去
+tempdata[nomiss, ] %>%
+  count(self) %>%
+  mutate(prop = round(`n` * 100 / sum(`n`), 2 ))
+```
+
+```{r}
+tempdata[nomiss, ] %>%
+  count(marry) %>%
+  mutate(prop = round(`n` * 100 / sum(`n`), 2 ))
+```
+
+
+
+## 3 统计检验
+
+```{r}
+# Check the ignorability of case-wise deletion
+# in some specific range of age, did the miss and nonmiss data balance?
+t.test(swb ~ Nomiss, data = tempdata[!is.na(tempdata$age1), ], var = F)
+
+```
+
+## 4 谁更幸福
+
+```{r}
+# 2005年不同阶层的幸福感
+# Fig.2
+tempdata[nomiss, ] %>%
+  group_by(occ) %>%
+  summarise(N = n(), HAPPY = round(mean(swb), 3), Sd = round(sd(swb),3 ))
+```
+
+```{r}
+tempdata
+```
+
+```{r}
+# Fig.3 OLS of CGSS2005
+library(lmtest)
+library(car)
+
+
+A1 <- lm(swb ~ adpr + clerk + slemp + serve + worker + unemp + male + han + age1 + age2 + urban + party + health + marry + close, data = tempdata[nomiss,])
+A1 <- coeftest(A1, vcov=hccm)
+
+A2 <- lm(swb ~ adpr + clerk + slemp + serve + worker + unemp 
+         + pe + ss + he + lnperin
+         + male + han + age1 + age2 + urban + party + health + marry + close, data = tempdata[nomiss,])
+A2 <- coeftest(A2, vcov=hccm)
+
+A3 <- lm(swb ~ adpr + clerk + slemp + serve + worker + unemp 
+         + up + down + peerh + peerl
+         + male + han + age1 + age2 + urban + party + health + marry + close, data = tempdata[nomiss,])
+A3 <- coeftest(A3, vcov=hccm)
+
+library(stargazer)
+stargazer(list(A1, A2, A3),type="text" , keep.stat=c("n" , "rsq"))
+```
+
+```{r}
+# Fig.5 
+
+# 首先生成省份层次的税负水平变量
+taxdata <- tibble(
+  qs2a = as.numeric(names(table(tempdata[nomiss,]$qs2a))),
+  tax = c(17.5, 14.35, 8.805, 15.035, 10.605, 13.295, 10.395, 11.31, 23.51, 11.92, 12.635, 10.175, 10.175,
+          9.3, 9.255, 8.115, 9.605, 10.045, 12.785, 10.505, 11.235, 12.115, 9.685, 15.98, 19.725, 12.575, 11.76, 12.67)
+)
+taxdata
+```
+
+
+
+```{r}
+# 拼接数据
+tempdata <- tempdata %>%
+  left_join(taxdata, by = "qs2a")
+
+tempdata
+```
+
+```{r}
+# 将收入按照组均值进行对中
+HLMdata <- tempdata[nomiss, ] %>%
+  group_by(qs2a) %>%
+  mutate(meaninc = mean(lnperin),
+         continc = lnperin - meaninc)
+
+# 生成因解释系数而产生的交互项
+HLMdata <- HLMdata %>%
+  mutate(tax_inc  = tax * continc)
+```
+
+
+```{r}
+library(lmerTest)
+C1 <- lmer(swb ~ 1 + male + han + age1 + age2 + urban + party + health + marry + close
+                   + pe + ss + he
+                    + tax + continc + tax_inc + 
+                   (1 + continc|qs2a), data = HLMdata)
+bruceR::HLM_summary(C1)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
