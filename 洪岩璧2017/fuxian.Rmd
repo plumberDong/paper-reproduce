@@ -25,7 +25,7 @@ library(tidyverse)
 ```
 
 ```{r}
-cgss2005 <- read_dta("cgss2005_14.dta")
+cgss2005 <- read_dta("../DATA/cgss2005_14.dta")
 # 备份数据
 data2005 <- as_tibble(cgss2005)
 dim(data2005)
