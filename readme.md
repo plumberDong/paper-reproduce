@@ -14,6 +14,3 @@
 
 - 偷了点懒，只复现了一个数据集的模型，包括PSM、 OLS、IV
 - 另外，由于存在多个因变量的，工具变量部分实在写出来太长，就只复现了一个因变量。
-
-> Acemoglu, Daron , Simon Johnson, and James A. Robinson, 2001, "The Colonial Origins of Comparative Development: An Empirical Investigation." *The American Economic Review.* 91(5):1369-1401.
-
