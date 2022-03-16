@@ -1,0 +1,324 @@
+---
+title: "Acemoglu2001"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+pacman::p_load(haven, tidyverse, ggplot2)
+```
+
+## Fig.1
+
+```{r}
+data <- read_dta('colonial_origins/maketable1/maketable1.dta')
+
+data0 <- data %>%
+  filter(!is.na(shortnam) & shortnam != "") %>%
+  filter(!is.na(logpgp95) & !is.na(logem4))
+
+ggplot(data0, aes(x = logem4, y = logpgp95)) + 
+  geom_text(aes(label = shortnam)) + 
+  geom_smooth(method = lm, se = F) + 
+  theme_bw() + 
+  labs(title = 'REDUCED-FROM RELATIONSHIP BETWEEN INCOME AND SETTLER MORTALITY',x='Log of Settler Mortality', y = 'Log GDP per capital, PPP, 1995')
+```
+
+## Table 1
+
+```{r}
+vars <- c('logpgp95', 'loghjypl', 'avexpr', 'cons00a', 'cons1', 'democ00a', 'euro1900', 'logem4')
+
+# col1
+data1 <- data %>%
+  select(-shortnam) %>%
+  gather(key = "key", value = 'value') %>%
+  filter(key %in% vars)
+
+
+data1 %>% 
+  group_by(key) %>%
+  summarise(
+  Mean = mean(value, na.rm = T), 
+  Sd = sd(value, na.rm = T ),
+  N = sum(!is.na(value)  ) # 该变量有多少个非缺失值
+)
+```
+
+```{r}
+# col2 
+# col1
+data2 <- data %>%
+  filter(baseco == 1) %>%
+  select(-shortnam) %>%
+  gather(key = "key", value = 'value') %>%
+  filter(key %in% vars)
+
+
+data2 %>% 
+  group_by(key) %>%
+  summarise(
+  Mean = mean(value, na.rm = T), 
+  Sd = sd(value, na.rm = T ),
+  N = sum(!is.na(value)  ) 
+)
+```
+
+```{r}
+# col3 就不复现了
+data3 <- data %>%
+  filter(baseco == 1) %>%
+  select(-shortnam)
+
+q <- quantile(data3$extmort4, na.rm = T)  
+q[1] <- 8.54 # 避免不包含第一个
+Q <-  cut(data3$extmort4, breaks = q, labels = c('a','b','c','d')) # 四个水平段
+
+data3 <- data3 %>%
+  select(vars) %>%
+  gather(key = "key", value = 'value')
+  
+data3$Q <- rep(Q, times = length(vars)) 
+
+data3 %>% 
+  group_by(key, Q) %>%
+  summarise(
+  Mean = mean(value, na.rm = T)
+)
+```
+
+## Table.2
+
+```{r}
+# 当下制度和当前经济的关系
+# 结果有些不一样，但结论不变
+data <- read_dta('colonial_origins/maketable2/maketable2.dta')
+
+pacman::p_load(lmtest, car, stargazer)
+
+
+fit1 <- lm(logpgp95 ~ avexpr, data = data)
+col1 <- coeftest(fit1, vcov=hccm)
+
+fit2 <- lm(logpgp95 ~ avexpr, data = data, subset = (baseco == 1)) 
+col2 <- coeftest(fit2, vcov=hccm)
+
+fit3 <- lm(logpgp95 ~ avexpr + lat_abst, data = data) 
+col3 <- coeftest(fit3, vcov=hccm)
+
+fit4 <- lm(logpgp95 ~ avexpr + lat_abst + africa + asia + other, data = data)
+col4 <- coeftest(fit4, vcov = hccm)
+
+fit5 <- lm(logpgp95 ~ avexpr + lat_abst, data = data, subset = (baseco == 1)) 
+col5 <- coeftest(fit5, vcov = hccm)
+
+fit6 <- lm(logpgp95 ~ avexpr + lat_abst + africa + asia + other, data = data, subset = (baseco == 1))
+col6 <- coeftest(fit6, vcov = hccm)
+
+fit7 <- lm(loghjypl ~ avexpr, data = data)
+col7 <- coeftest(fit7, vcov=hccm)
+
+fit8 <- lm(loghjypl ~ avexpr, data = data, subset = (baseco == 1))
+col8 <- coeftest(fit8, vcov=hccm)
+
+
+# 获得调整r2和样本量
+fit_ls = list(fit1, fit2, fit3, fit4, fit5, fit6, fit7, fit8) 
+Adj_R_2 <- map_dbl(fit_ls, ~round(summary(.)$adj.r.squared, 2))
+N <- map_dbl(fit_ls, ~length(summary(.)$residuals))
+
+# 生成表格
+stargazer(list(col1, col2, col3, col4, col5, col6, col7, col8), type="text" , keep.stat=c("n" , "rsq"),
+          # 添加样本量和r2
+          add.lines = list(c("N", N), 
+                           c('R2', Adj_R_2))
+          )
+
+```
+
+## Fig3
+
+```{r}
+data <- read_dta('colonial_origins/maketable1/maketable1.dta')
+
+ggplot(data, aes(x = logem4, y = avexpr)) + 
+  geom_text(aes(label = shortnam)) + 
+  geom_smooth(method = lm, se = F) + 
+  theme_bw() + 
+  labs(x='Log of Settler Mortality', y = 'Average Expropriation Risk 1985-95')
+```
+
+## Table3
+
+```{r}
+# Panel A
+# 当前制度和过去制度、殖民状况以及死亡率的关系
+
+# Prepare data
+data <- read_dta('colonial_origins/maketable3/maketable3.dta')
+data <- data %>%
+  filter(excolony == 1 & extmort4 != . ) %>%
+  mutate(euro1900 = euro1900 / 100)
+
+
+#col1 : regress current institutions on early institutions
+fit1 <- lm(avexpr ~ cons00a, data = data)
+
+
+#col2 : regress current institutions on early institutions and latitude
+fit2 <- lm(avexpr ~ cons00a + lat_abst, data = data)
+
+#col3: regress current institutions on early democracy
+fit3 <- lm(avexpr ~ democ00a, data = data)
+
+#col4: regress current institutions on early democracy and latitude
+fit4 <- lm(avexpr ~ democ00a + lat_abst, data = data)
+
+#col5 
+fit5 <- lm(avexpr ~ indtime + cons1, data = data)
+
+#col6
+fit6 <- lm(avexpr ~ indtime + cons1 + lat_abst, data = data)
+
+#col7
+fit7 <- lm(avexpr ~ euro1900, data = data)
+
+#col8
+fit8 <- lm(avexpr ~ euro1900 + lat_abst, data = data)
+
+# col9 and col10 will be the first stage for 2SLS
+#col9
+fit9 <- lm(avexpr ~ logem4, data = data, subset = (!is.na(data$logpgp95)))
+
+#col10
+fit10 <- lm(avexpr ~ logem4 + lat_abst, data = data,  subset = (!is.na(data$logpgp95)))
+
+stargazer(list(fit1, fit2, fit3, fit4, fit5, fit6, fit7, fit8, fit9, fit10), type="text" , keep.stat=c("n" , "rsq"))
+```
+
+
+```{r}
+# Panel B
+# Dependent Var is Constraint on Executive in 1900
+
+fit1 <- lm(cons00a ~ euro1900, data = data, subset = (!is.na(data$logpgp95)))
+
+fit2 <- lm(cons00a ~ euro1900 + lat_abst, data = data, subset = (!is.na(data$logpgp95)))
+
+fit3 <- lm(cons00a ~ logem4, data = data)
+
+fit4 <- lm(cons00a ~ logem4 + lat_abst, data = data)
+
+stargazer(list(fit1, fit2, fit3, fit4), type="text" , keep.stat=c("n" , "rsq"))
+```
+
+```{r}
+# Panel B
+# Dependent Var is Democracy in 1900
+
+fit1 <- lm(democ00a ~ euro1900, data = data, subset = (!is.na(data$logpgp95)))
+
+fit2 <- lm(democ00a ~ euro1900 + lat_abst, data = data, subset = (!is.na(data$logpgp95)))
+
+fit3 <- lm(democ00a ~ logem4, data = data, subset = (!is.na(data$logpgp95)))
+
+fit4 <- lm(democ00a ~ logem4 + lat_abst, data = data, subset = (!is.na(data$logpgp95)))
+
+stargazer(list(fit1, fit2, fit3, fit4), type="text" , keep.stat=c("n" , "rsq"))
+
+```
+
+
+```{r}
+fit1 <- lm(euro1900 ~ logem4, data = data, subset = (!is.na(data$logpgp95)))
+
+fit2 <- lm(euro1900 ~ logem4 + lat_abst, data = data, subset = (!is.na(data$logpgp95)))
+
+stargazer(list(fit1, fit2), type="text" , keep.stat=c("n" , "rsq"))
+```
+
+# Table 4
+- 只复现`PanelA`这一工具变量的部分
+
+```{r}
+# Panel A IV regression
+library(AER)
+data <- read_dta('colonial_origins/maketable4/maketable4.dta') %>%
+  filter(baseco == 1)
+
+fit1 <- ivreg(logpgp95 ~ avexpr | logem4, data = data)
+
+fit2 <- ivreg(logpgp95 ~ avexpr + lat_abst | logem4 + lat_abst, data = data)
+
+stargazer(list(fit1, fit2), type="text" , keep.stat=c("n"))
+```
+
+
+
+```{r}
+fit3 <- ivreg(logpgp95 ~ avexpr | logem4, data = data, subset = (data$rich4 != 1))
+
+fit4 <- ivreg(logpgp95 ~ avexpr + lat_abst | logem4 + lat_abst, data = data, subset = (data$rich4 != 1))
+
+stargazer(list(fit3, fit4), type="text" , keep.stat=c("n"))
+```
+
+```{r}
+fit5 <- ivreg(logpgp95 ~ avexpr | logem4, data = data, subset = (data$africa != 1))
+
+fit6 <- ivreg(logpgp95 ~ avexpr + lat_abst | logem4 + lat_abst, data = data, subset = (data$africa != 1))
+
+stargazer(list(fit5, fit6), type="text" , keep.stat=c("n"))
+```
+
+```{r}
+# col 7-8
+data <- data %>%
+  mutate(other_cont = 0)
+data$other_cont[data$shortnam %in% c('AUS', 'MLT', 'NZL')] <- 1
+
+fit7 <- ivreg(logpgp95 ~ avexpr + africa + asia + other_cont| logem4  + africa + asia + other_cont , data = data)
+
+fit8 <- ivreg(logpgp95 ~ avexpr + africa + asia + other_cont + lat_abst | logem4  + africa + asia + other_cont + lat_abst , data = data)
+
+fit9 <- ivreg(loghjypl ~ avexpr | logem4, data = data)
+
+stargazer(list(fit7, fit8, fit9), type="text" , keep.stat=c("n"))
+```
+
+## Table 5 & Table 6 & Table 7
+
+- robustness 部分，省略了。
+
+## Table8
+
+- 我没有在R中找到对两个工具变量模型执行豪斯曼检验的命令
+- 这里做了一个折衷，使用Sargan tests进行检验，其含义如下：
+
+> `Sargan tests` overidentification restrictions. The idea is that if you have more than one instrument per endogenous variable, the model is overidentified, and you have some excess information. All of the instruments must be valid for the inferences to be correct. So it tests that all exogenous instruments are in fact exogenous, and uncorrelated with the model residuals. If it is significant, it means that you don't have valid instruments (somewhere in there, as this is a global test). In this case, this isn't a concern. This can get more complex, and researchers have suggested doing further analysis (see this).
+
+```{r}
+data <- read_dta('colonial_origins/maketable8/maketable8.dta') %>%
+  filter(baseco == 1)
+
+#col1
+library(plm)
+library(AER)
+data <- as.data.frame(data)
+
+fit1 <- ivreg(logpgp95 ~ avexpr + lat_abst | euro1900 + logem4 +  + lat_abst, data = data)
+
+summary(fit1, diagnostics = TRUE)
+
+# 显示Sargan的p>.05,所以可以认为都是外生的，即这些工具变量和主方程中的epsilon不相关
+```
+
+
+
+
+
+
